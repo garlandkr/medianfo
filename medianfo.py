@@ -13,26 +13,51 @@ the columns as expected. There is no error checking.
 Project Page - http://code.google.com/p/medianfo/
 Author: Ken Garland
 License: GPLv3
-
 """
 
 import re
 import os
 import subprocess
 
+import gdata.spreadsheet.service
+
 movies = {}
 
 # Root directory to scan media
-media_dir = "/Volumes/Media"
+media_dir = "/Volumes/Videos/Movies"
+
+# Total count of movies in directory
+total_movies = int(len(os.walk(media_dir).next()[1]))
+total_movies_countdown = total_movies
 
 # Google setup
 GoogleUser = ""
 GooglePW = ""
-spreadsheet_key = ""
-worksheet_id = ""
+GSheetID = ""
+GWorkID = ""
+
+
+def GSheetService(user,pwd):
+    gd_client = gdata.spreadsheet.service.SpreadsheetsService()
+    gd_client.email = user
+    gd_client.password = pwd
+    gd_client.source = 'Media NFO'
+    gd_client.ProgrammaticLogin()
+    
+    return gd_client
+
+# Connecting to Google docs service
+try:
+    gs = GSheetService(GoogleUser,GooglePW)
+    print "Connected to Google Docs"
+except Exception, e:
+    print "Failed connection - %s" % e
+
+# Gathering spreadsheet information from atom feed
+sheets = gs.GetSpreadsheetsFeed()
 
 # This is how we know which files to play in mplayer, add more types if needed
-file_types = ('mkv', 'avi', 'm4v', 'mp4', 'wmv')
+file_types = ('mkv', 'avi', 'm4v', 'mp4', 'wmv', 'mpg')
 
 # Traverse the media directories for the stuff we want
 for root,subfolders,files in os.walk(media_dir):
@@ -42,16 +67,18 @@ for root,subfolders,files in os.walk(media_dir):
             movies[movie_name] = {'nfo': filename}
             movies[movie_name]['dir'] = root
 
+print "Finished walking media folder."
+
 # Parse it out with mplayer
 for movie in movies:
+    total_movies_countdown -= 1
+    print "Parsing:  %s - Remaining: %d of %d" % (movie, total_movies_countdown, total_movies)
     files = os.walk(movies[movie]['dir']).next()[2]
     for filename in files:
         try:
             if filename[-3:] in file_types:
                 movies[movie]['file'] = filename
-                p = subprocess.Popen(['mplayer', '-identify', '-frames', '0', '-ao', 'null',
-                movies[movie]['dir']+"/"+movies[movie]['file']], stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE)
+                p = subprocess.Popen(['mplayer', '-identify', '-frames', '0', '-ao', 'null', '-vo', 'null', movies[movie]['dir']+"/"+movies[movie]['file']], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
                 temp_list = []
                 for line in p.stdout:
                     temp_list.append(line.strip())
@@ -79,7 +106,7 @@ for movie in movies:
                     elif "Selected video codec:" in line:
                         movies[movie]['selectedvideocodec'] = line.split(": ", 1)[1]
                     elif "ID_VIDEO_CODEC" in line:
-                        movies[movie]['video_codec'] = line.split("=")[1]
+                        movies[movie]['videocodec'] = line.split("=")[1]
                     elif "Opening audio decoder:" in line:
                         movies[movie]['openingaudiodecoder'] = line.split(": ", 1)[1]
                     elif "AUDIO: " in line:
@@ -98,34 +125,14 @@ for movie in movies:
             # Interactive debugging on Exception, quit to exit
             import pdb; pdb.set_trace()
 
-# If you don't want to use gdocs comment everything below
-import gdata.spreadsheet.service
-
-
-def GSheetService(user,pwd):
-    # Authentication to gdata
-    gd_client = gdata.spreadsheet.service.SpreadsheetsService()
-    gd_client.email = user
-    gd_client.password = pwd
-    gd_client.source = 'Media NFO'
-    gd_client.ProgrammaticLogin()
-    
-    return gd_client
-
-# Connecting to service and getting spreadsheet data
-gs = GSheetService(GoogleUser,GooglePW)
-sheets = gs.GetSpreadsheetsFeed()
-
-# The following returns a feed for the rows
-lfeed = gs.GetListFeed(key, wksht_id)
-
-# Returns a list of columns with tuples of row data
-#print map(lambda e: e.title.text + " : "  + e.id.text.rsplit('/', 1)[1],sheets.entry)
-
-
-for movie in movies:
-    data_insert = {'name': movie}
+    # The next block of code is for inserting rows into the worksheet.
+    GDataStore = {'name': movie}
     for k,v in movies[movie].iteritems():
-        data_insert[k] = v
-    # Insert row, dict key is column name and value is added row data
-    gs.InsertRow(data_insert, spreadsheet_key, worksheet_id)
+        GDataStore[k] = v
+    try:
+        gs.InsertRow(GDataStore, GSheetID, GWorkID)
+        print "Inserting row: %s" % movie
+    except Exception, e:
+        print "Unable to insert: %s - %s" % (movie, e)
+        import pdb; pdb.set_trace()
+
