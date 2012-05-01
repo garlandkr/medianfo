@@ -1,0 +1,1 @@
+[![Build Status](https://secure.travis-ci.org/garlandkr/mediainfo.png)](http://travis-ci.org/garlandkr/mediainfo)
